@@ -17,6 +17,14 @@ async def is_user_joined(user_id: int, context) -> bool:
         return True
 
 
+def get_thumb_photo(photos):
+    """Pick best photo for video thumbnail: largest that fits <=320px & <=200KB."""
+    suitable = [p for p in photos if p.width <= 320 and p.height <= 320 and p.file_size <= 200 * 1024]
+    if suitable:
+        return max(suitable, key=lambda p: p.file_size)
+    return min(photos, key=lambda p: p.file_size)
+
+
 async def my_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     thumbnail = await db.get_thumbnail(update.message.from_user.id)
     if thumbnail:
@@ -47,13 +55,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(FORCE_SUB_MSG, parse_mode='HTML')
         return
     photos = update.message.photo
-    largest = max(photos, key=lambda p: p.file_size)
+    thumb_photo = get_thumb_photo(photos)
     state = await db.get_state(user_id)
     if state == 'waiting_for_image':
-        smallest = min(photos, key=lambda p: p.file_size)
-        if smallest.file_size > 200 * 1024 or smallest.width > 320 or smallest.height > 320:
-            await update.message.reply_text('❌ Send a smaller image (under 200KB, 320x320px).')
-            return
         user = await db.get_user(user_id)
         try:
             entities = [
@@ -63,19 +67,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_video(
                 chat_id=update.message.chat_id,
                 video=user['video_file_id'],
-                thumbnail=largest.file_id,
+                thumbnail=thumb_photo.file_id,
                 caption=user['video_caption'],
                 caption_entities=entities,
                 supports_streaming=True,
                 has_spoiler=user.get('has_spoiler', False),
                 reply_to_message_id=update.message.message_id - 1
             )
-            await db.reset_state(user_id, keep_thumbnail=largest.file_id)
+            await db.reset_state(user_id, keep_thumbnail=thumb_photo.file_id)
         except TelegramError as e:
             logger.error(f'send_video error: {e}')
             await update.message.reply_text(f'❌ Error: {e}')
     else:
-        await db.set_thumbnail(user_id, largest.file_id)
+        await db.set_thumbnail(user_id, thumb_photo.file_id)
         await db.set_state(user_id, 'idle')
         await update.message.reply_text('✅ Thumbnail saved! Now send me a video.')
 
