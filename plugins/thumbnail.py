@@ -11,9 +11,10 @@ logger = logging.getLogger(__name__)
 async def is_user_joined(user_id: int, context) -> bool:
     try:
         member = await context.bot.get_chat_member(FORCE_SUB_CHANNEL, user_id)
-        return member.status in ['member', 'administrator', 'creator']
-    except Exception:
-        return False
+        return member.status in ['member', 'administrator', 'creator', 'restricted']
+    except Exception as e:
+        logger.error(f'Force sub check failed (allowing user): {e}')
+        return True
 
 
 async def my_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE):
