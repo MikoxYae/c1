@@ -1,10 +1,10 @@
 import os
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
-MONGO_URI = os.environ.get('MONGO_URI', '')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8945761786:AAFFOW8IZZqh7jI9iUJ-UvsWNx2bMfQ7E_8')
+MONGO_URI = os.environ.get('MONGO_URI', 'mongodb+srv://Payal:Aloksingh@payal.jv2kwch.mongodb.net/?appName=Payal')
 APP_ID = int(os.environ.get('APP_ID', '27570787'))
-API_HASH = os.environ.get('API_HASH', '')
-START_PIC = os.environ.get('START_PIC', '')
+API_HASH = os.environ.get('API_HASH', 'f5e4d37759af94d4efc2dfb58b30af39')
+START_PIC = os.environ.get('START_PIC', 'https://graph.org/file/c3298a2f4d623e7f204c1-882cbd3ff41094cb41.jpg')
 FORCE_SUB_CHANNEL = int(os.environ.get('FORCE_SUB_CHANNEL', '-1002432405855'))
 
 START_MSG = (
