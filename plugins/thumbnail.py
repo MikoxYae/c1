@@ -1,4 +1,6 @@
+import io
 import logging
+from PIL import Image
 from telegram import Update, MessageEntity
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters, CallbackQueryHandler
@@ -17,12 +19,19 @@ async def is_user_joined(user_id: int, context) -> bool:
         return True
 
 
-def get_thumb_photo(photos):
-    """Pick best photo for video thumbnail: largest that fits <=320px & <=200KB."""
-    suitable = [p for p in photos if p.width <= 320 and p.height <= 320 and p.file_size <= 200 * 1024]
-    if suitable:
-        return max(suitable, key=lambda p: p.file_size)
-    return min(photos, key=lambda p: p.file_size)
+async def prepare_thumbnail(file_id: str, context) -> io.BytesIO:
+    """Download photo and resize to <=320x320 JPEG for use as video thumbnail."""
+    tg_file = await context.bot.get_file(file_id)
+    buf = io.BytesIO()
+    await tg_file.download_to_memory(buf)
+    buf.seek(0)
+    img = Image.open(buf).convert('RGB')
+    img.thumbnail((320, 320), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format='JPEG', quality=85)
+    out.seek(0)
+    out.name = 'thumbnail.jpg'
+    return out
 
 
 async def my_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -55,7 +64,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(FORCE_SUB_MSG, parse_mode='HTML')
         return
     photos = update.message.photo
-    thumb_photo = get_thumb_photo(photos)
+    largest = max(photos, key=lambda p: p.file_size)
     state = await db.get_state(user_id)
     if state == 'waiting_for_image':
         user = await db.get_user(user_id)
@@ -64,22 +73,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 MessageEntity(type=e['type'], offset=e['offset'], length=e['length'], user=e.get('user'))
                 for e in (user.get('caption_entities') or [])
             ] or None
+            thumb_buf = await prepare_thumbnail(largest.file_id, context)
             await context.bot.send_video(
                 chat_id=update.message.chat_id,
                 video=user['video_file_id'],
-                thumbnail=thumb_photo.file_id,
+                thumbnail=thumb_buf,
                 caption=user['video_caption'],
                 caption_entities=entities,
                 supports_streaming=True,
                 has_spoiler=user.get('has_spoiler', False),
                 reply_to_message_id=update.message.message_id - 1
             )
-            await db.reset_state(user_id, keep_thumbnail=thumb_photo.file_id)
+            await db.reset_state(user_id, keep_thumbnail=largest.file_id)
         except TelegramError as e:
             logger.error(f'send_video error: {e}')
             await update.message.reply_text(f'❌ Error: {e}')
     else:
-        await db.set_thumbnail(user_id, thumb_photo.file_id)
+        await db.set_thumbnail(user_id, largest.file_id)
         await db.set_state(user_id, 'idle')
         await update.message.reply_text('✅ Thumbnail saved! Now send me a video.')
 
@@ -95,10 +105,11 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     saved = await db.get_thumbnail(user_id)
     if saved:
         try:
+            thumb_buf = await prepare_thumbnail(saved, context)
             await context.bot.send_video(
                 chat_id=update.message.chat_id,
                 video=video.file_id,
-                thumbnail=saved,
+                thumbnail=thumb_buf,
                 caption=update.message.caption,
                 caption_entities=update.message.caption_entities,
                 supports_streaming=True,
@@ -107,7 +118,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         except TelegramError as e:
             logger.error(f'send_video error: {e}')
-            await update.message.reply_text('❌ Error with saved thumbnail. Send a fresh photo.')
+            await update.message.reply_text('❌ Error applying thumbnail. Send a fresh photo.')
             await db.delete_thumbnail(user_id)
             return
     entities = [
